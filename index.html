@@ -15,6 +15,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+
   <script>
     tailwind.config = {
       theme: {
@@ -40,7 +42,6 @@
       },
     };
   </script>
-  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
@@ -299,7 +300,7 @@
     // --- إعدادات الربط بقاعدة بيانات Supabase ---
     const supabaseUrl = 'https://glbjeszhpfxtevwhcrfi.supabase.co';
     const supabaseAnonKey = 'sb_publishable_OPXzN6_HdE7mrbAhIi_eIQ_196y9Q07';
-    const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
     // ---------------------------------------------
 
     const STORAGE_KEYS = {
@@ -594,7 +595,7 @@
 
     async function loadCatalogFromDB() {
       try {
-        const { data, error } = await supabase.from('platform_metadata').select('data').eq('key', 'catalog').single();
+        const { data, error } = await supabaseClient.from('platform_metadata').select('data').eq('key', 'catalog').single();
         if (error || !data || !data.data || !data.data.grades) {
           return buildDefaultCatalog();
         }
@@ -606,7 +607,7 @@
 
     async function persistCatalog() {
       try {
-        await supabase.from('platform_metadata').upsert({ key: 'catalog', data: catalog });
+        await supabaseClient.from('platform_metadata').upsert({ key: 'catalog', data: catalog });
       } catch (error) {
         console.error("خطأ في الحفظ السحابي:", error);
       }
@@ -618,7 +619,7 @@
     // --- دوال الاتصال بقاعدة بيانات Supabase ---
     async function checkStudentEligibilityFromDB(name, gradeId) {
       try {
-        const { data, error } = await supabase.from('students_whitelist').select('*').eq('name', String(name).trim()).eq('grade_id', Number(gradeId));
+        const { data, error } = await supabaseClient.from('students_whitelist').select('*').eq('name', String(name).trim()).eq('grade_id', Number(gradeId));
         if (error) throw error;
         return data && data.length > 0;
       } catch (err) {
@@ -629,7 +630,7 @@
 
     async function fetchWhitelistFromDB() {
       try {
-        const { data, error } = await supabase.from('students_whitelist').select('*').order('grade_id', { ascending: true });
+        const { data, error } = await supabaseClient.from('students_whitelist').select('*').order('grade_id', { ascending: true });
         if (error) throw error;
         return data || [];
       } catch (err) {
@@ -2164,7 +2165,7 @@ window.switchAdminTab = function(tabName) {
         
         if (!exists) {
           try {
-            await supabase.from('students_whitelist').insert([{ name: name, grade_id: Number(gradeId) }]);
+            await supabaseClient.from('students_whitelist').insert([{ name: name, grade_id: Number(gradeId) }]);
             nameInput.value = "";
             gradeSelect.value = "";
           } catch (error) {
@@ -2286,7 +2287,7 @@ window.switchAdminTab = function(tabName) {
           button.textContent = "جاري الحذف...";
           button.disabled = true;
           try {
-            await supabase.from('students_whitelist').delete().eq('id', id);
+            await supabaseClient.from('students_whitelist').delete().eq('id', id);
             renderWhitelistTable();
           } catch(err) { console.error("Error deleting:", err); }
         });
