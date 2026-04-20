@@ -41,6 +41,7 @@
     };
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
       --ink: #173558;
@@ -295,6 +296,11 @@
   <script>
     // غيّر كلمة المرور الافتراضية هنا عند الحاجة.
     const ADMIN_PASSWORD = "admin123";
+    // --- إعدادات الربط بقاعدة بيانات Supabase ---
+    const supabaseUrl = 'https://glbjeszhpfxtevwhcrfi.supabase.co';
+    const supabaseAnonKey = 'sb_publishable_OPXzN6_HdE7mrbAhIi_eIQ_196y9Q07';
+    const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    // ---------------------------------------------
 
     const STORAGE_KEYS = {
       catalog: "edu-platform-catalog-v4",
@@ -619,39 +625,28 @@
       localStorage.setItem(STORAGE_KEYS.students, JSON.stringify(store));
     }
 
-    function loadWhitelist() {
+    // --- دوال الاتصال بقاعدة بيانات Supabase ---
+    async function checkStudentEligibilityFromDB(name, gradeId) {
       try {
-        const rawValue = localStorage.getItem(STORAGE_KEYS.whitelist);
-        const parsed = rawValue ? JSON.parse(rawValue) : [];
-        return Array.isArray(parsed)
-          ? parsed
-              .filter((entry) => entry && typeof entry.name === "string" && String(entry.name).trim() && entry.gradeId !== undefined && entry.gradeId !== null)
-              .map((entry) => ({
-                name: String(entry.name).trim(),
-                gradeId: Number(entry.gradeId),
-              }))
-          : [];
-      } catch (error) {
-        return [];
+        const { data, error } = await supabase.from('students_whitelist').select('*').eq('name', String(name).trim()).eq('grade_id', Number(gradeId));
+        if (error) throw error;
+        return data && data.length > 0;
+      } catch (err) {
+        console.error("خطأ في الاتصال بقاعدة البيانات:", err);
+        return false;
       }
     }
 
-    function saveWhitelist(list) {
-      const sanitized = Array.isArray(list)
-        ? list
-            .filter((entry) => entry && typeof entry.name === "string" && String(entry.name).trim() && entry.gradeId !== undefined && entry.gradeId !== null)
-            .map((entry) => ({
-              name: String(entry.name).trim(),
-              gradeId: Number(entry.gradeId),
-            }))
-        : [];
-      localStorage.setItem(STORAGE_KEYS.whitelist, JSON.stringify(sanitized));
+    async function fetchWhitelistFromDB() {
+      try {
+        const { data, error } = await supabase.from('students_whitelist').select('*').order('grade_id', { ascending: true });
+        if (error) throw error;
+        return data || [];
+      } catch (err) {
+        console.error("خطأ في جلب الصلاحيات:", err);
+        return [];
+      }
     }
-
-    function checkStudentEligibility(name, gradeId) {
-      return loadWhitelist().some((entry) => entry.name === String(name).trim() && String(entry.gradeId) === String(gradeId));
-    }
-
     function ensureStudentRecord(name, gradeId = null) {
       const normalized = normalizeName(name);
       const store = loadStudentStore();
@@ -824,20 +819,42 @@
       studentPromptError.textContent = "";
     }
 
-    function saveStudentName() {
+    async function saveStudentName() {
       const name = studentNameInput.value.trim();
       const gradeId = studentGradeInput.value;
 
       if (!name || !gradeId) {
         studentPromptError.textContent = "من فضلك اكتب الاسم واختر الصف الدراسي.";
-        if (!name) {
-          triggerShake(studentNameInput);
-        }
-        if (!gradeId) {
-          triggerShake(studentGradeInput);
-        }
+        if (!name) triggerShake(studentNameInput);
+        if (!gradeId) triggerShake(studentGradeInput);
         return;
       }
+
+      // تغيير شكل الزرار ليُظهر للطفل أن النظام يبحث في السحابة
+      saveStudentNameButton.textContent = "جاري التحقق من السحابة...";
+      saveStudentNameButton.disabled = true;
+
+      // هنا الموقع بيسأل قاعدة بيانات Supabase
+      const isEligible = await checkStudentEligibilityFromDB(name, gradeId);
+
+      // إعادة الزرار لشكله الطبيعي
+      saveStudentNameButton.textContent = "حفظ الاسم والبدء";
+      saveStudentNameButton.disabled = false;
+
+      if (!isEligible) {
+        studentPromptError.textContent = "عفواً! هذا الاسم غير مسجل بهذا الصف في قاعدة البيانات.";
+        triggerShake(studentNameInput);
+        triggerShake(studentGradeInput);
+        return;
+      }
+
+      state.currentStudentKey = ensureStudentRecord(name, gradeId);
+      localStorage.setItem(STORAGE_KEYS.currentStudent, state.currentStudentKey);
+      closeStudentPrompt();
+      renderStudentBadge();
+      renderGradeCards();
+      openGrade(gradeId);
+    }
 
       if (!checkStudentEligibility(name, gradeId)) {
         studentPromptError.textContent = "هذا الاسم غير مسموح له بهذا الصف حاليًا.";
@@ -2153,26 +2170,40 @@ window.switchAdminTab = function(tabName) {
         });
       });
 
-      adminView.querySelector("#addWhitelistButton")?.addEventListener("click", () => {
+      adminView.querySelector("#addWhitelistButton")?.addEventListener("click", async () => {
         const nameInput = adminView.querySelector("#whitelistNameInput");
         const gradeSelect = adminView.querySelector("#whitelistGradeSelect");
+        const addBtn = adminView.querySelector("#addWhitelistButton");
+        
         const name = String(nameInput?.value || "").trim();
         const gradeId = gradeSelect?.value || "";
+        
         if (!name || !gradeId) {
           if (!name) triggerShake(nameInput);
           if (!gradeId) triggerShake(gradeSelect);
           return;
         }
 
-        const whitelist = loadWhitelist();
-        const exists = whitelist.some((entry) => entry.name === name && String(entry.gradeId) === String(gradeId));
+        addBtn.textContent = "جاري الإضافة للسحابة...";
+        addBtn.disabled = true;
+
+        const exists = await checkStudentEligibilityFromDB(name, gradeId);
+        
         if (!exists) {
-          whitelist.push({ name, gradeId: Number(gradeId) });
-          saveWhitelist(whitelist);
+          try {
+            await supabase.from('students_whitelist').insert([{ name: name, grade_id: Number(gradeId) }]);
+            nameInput.value = "";
+            gradeSelect.value = "";
+          } catch (error) {
+            console.error("خطأ أثناء الإضافة:", error);
+            alert("حدث خطأ أثناء الاتصال بقاعدة البيانات.");
+          }
+        } else {
+          alert("هذا الطالب مسجل مسبقاً في هذا الصف!");
         }
 
-        nameInput.value = "";
-        gradeSelect.value = "";
+        addBtn.textContent = "إضافة";
+        addBtn.disabled = false;
         renderWhitelistTable();
       });
     }
@@ -2259,16 +2290,35 @@ window.switchAdminTab = function(tabName) {
       });
     }
 
-    function renderWhitelistTable() {
+    async function renderWhitelistTable() {
       const tbody = document.getElementById("adminWhitelistTableBody");
       if (!tbody) return;
-      const whitelist = loadWhitelist();
+      
+      tbody.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-slate-500 font-bold">جاري تحميل البيانات من السحابة ☁️...</td></tr>';
+      
+      const whitelist = await fetchWhitelistFromDB();
 
       if (whitelist.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-slate-500 font-bold">لا توجد صلاحيات مضافة حتى الآن.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-slate-500 font-bold">لا توجد صلاحيات مضافة في قاعدة البيانات حتى الآن.</td></tr>';
         return;
       }
 
+      tbody.innerHTML = whitelist.map((entry) => `
+        <tr class="border-b border-slate-100 transition-colors hover:bg-slate-50"><td class="p-4 text-lg">${escapeHtml(entry.name)}</td><td class="p-4 text-center">${escapeHtml(getGradeById(entry.grade_id)?.label || `الصف ${entry.grade_id}`)}</td><td class="p-4 text-center"><button type="button" data-remove-whitelist="${entry.id}" class="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-200 focus:outline-none focus:ring-4 focus:ring-rose-200">إزالة</button></td></tr>
+      `).join("");
+
+      tbody.querySelectorAll("[data-remove-whitelist]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.dataset.removeWhitelist;
+          button.textContent = "جاري الحذف...";
+          button.disabled = true;
+          try {
+            await supabase.from('students_whitelist').delete().eq('id', id);
+            renderWhitelistTable();
+          } catch(err) { console.error("Error deleting:", err); }
+        });
+      });
+    }
       tbody.innerHTML = whitelist.map((entry, index) => `
         <tr class="border-b border-slate-100 transition-colors hover:bg-slate-50">
           <td class="p-4 text-lg">${escapeHtml(entry.name)}</td>
