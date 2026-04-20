@@ -612,6 +612,14 @@
         console.error("خطأ في الحفظ السحابي:", error);
       }
     }
+    function loadStudentStore() {
+      try {
+        const rawValue = localStorage.getItem(STORAGE_KEYS.students);
+        return rawValue ? JSON.parse(rawValue) : {};
+      } catch (error) {
+        return {};
+      }
+    }
     function saveStudentStore(store) {
       localStorage.setItem(STORAGE_KEYS.students, JSON.stringify(store));
     }
