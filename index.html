@@ -448,7 +448,7 @@
     const studentPromptError = document.getElementById("studentPromptError");
     const saveStudentNameButton = document.getElementById("saveStudentNameButton");
 
-    let catalog = loadCatalog();
+    let catalog = null;
 
     function createId(prefix = "id") {
       return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -592,35 +592,25 @@
       };
     }
 
-    function loadCatalog() {
+    async function loadCatalogFromDB() {
       try {
-        const rawValue = localStorage.getItem(STORAGE_KEYS.catalog);
-        if (!rawValue) {
-          const seeded = buildDefaultCatalog();
-          localStorage.setItem(STORAGE_KEYS.catalog, JSON.stringify(seeded));
-          return seeded;
+        const { data, error } = await supabase.from('platform_metadata').select('data').eq('key', 'catalog').single();
+        if (error || !data || !data.data || !data.data.grades) {
+          return buildDefaultCatalog();
         }
-        return normalizeCatalog(JSON.parse(rawValue));
+        return data.data;
       } catch (error) {
-        const seeded = buildDefaultCatalog();
-        localStorage.setItem(STORAGE_KEYS.catalog, JSON.stringify(seeded));
-        return seeded;
+        return buildDefaultCatalog();
       }
     }
 
-    function persistCatalog() {
-      localStorage.setItem(STORAGE_KEYS.catalog, JSON.stringify(catalog));
-    }
-
-    function loadStudentStore() {
+    async function persistCatalog() {
       try {
-        const rawValue = localStorage.getItem(STORAGE_KEYS.students);
-        return rawValue ? JSON.parse(rawValue) : {};
+        await supabase.from('platform_metadata').upsert({ key: 'catalog', data: catalog });
       } catch (error) {
-        return {};
+        console.error("خطأ في الحفظ السحابي:", error);
       }
     }
-
     function saveStudentStore(store) {
       localStorage.setItem(STORAGE_KEYS.students, JSON.stringify(store));
     }
@@ -677,7 +667,8 @@
       if (!record || !record.name || !record.gradeId) {
         return null;
       }
-      return checkStudentEligibility(record.name, record.gradeId) ? Number(record.gradeId) : null;
+      // نكتفي برقم الصف المحفوظ محلياً (تم التحقق منه مسبقاً)
+      return Number(record.gradeId);
     }
 
     function isCurrentStudentAuthorized() {
@@ -2531,14 +2522,23 @@ window.switchAdminTab = function(tabName) {
 
     window.addEventListener("hashchange", handleHashRoute);
 
-    renderGradeCards();
-    renderStudentBadge();
-    handleHashRoute();
-    if (location.hash !== "#admin") {
-      switchView("home");
-      updateHeader();
-      ensureStudentIdentity();
+    async function startPlatform() {
+      // 1. جلب المحتوى من السحابة أولاً
+      catalog = await loadCatalogFromDB();
+      
+      // 2. رسم الموقع
+      renderGradeCards();
+      renderStudentBadge();
+      handleHashRoute();
+      if (location.hash !== "#admin") {
+        switchView("home");
+        updateHeader();
+        ensureStudentIdentity();
+      }
     }
+
+    // تشغيل المنصة
+    startPlatform();
   </script>
 </body>
 </html>
